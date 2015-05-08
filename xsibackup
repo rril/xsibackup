@@ -16,15 +16,18 @@
 #                                                                               #	
 #################################################################################
 
+OLDIFS=$IFS
+newline=$'\012'
+
 keyvalstr="$@"
 
 for block in "$@"
 do
 
-VARNAM=$( echo $block | awk -F "=" '{print $1}' | sed -e 's/^ *//g' -e 's/ *$//g' )
-VARNAM=${VARNAM//-/}
-VARVAL="$( echo $block | awk -F "=" '{print $2}' | sed -e 's/^ *//g' -e 's/ *$//g' )"
-VARVAL="${VARVAL//"/\"}"
+	VARNAM=$( echo $block | awk -F "=" '{print $1}' | sed -e 's/^ *//g' -e 's/ *$//g' )
+	VARNAM=${VARNAM//-/}
+	VARVAL="$( echo $block | awk -F "=" '{print $2}' | sed -e 's/^ *//g' -e 's/ *$//g' )"
+	VARVAL="${VARVAL//"/\"}"
 
 eval $VARNAM=\""$VARVAL"\"
 
@@ -32,10 +35,21 @@ done
 
 if [ "${time}" != "" ]
 then
-	if [ "${time}" != "$( date +"%a %H:%M" )" ]
+	righttime=0
+	IFS="|"
+	for moment in $time	
+	do
+		if [ "$moment" == "$( date +"%a %H:%M" )" ]
+		then
+			righttime=1
+		fi
+	done
+	IFS=$OLDIFS
+	
+	if [ ${righttime} == 0 ]
 	then
-        	exit 0
-	fi
+		exit 0
+	fi	
 fi
 
 HOSTNAME=$(hostname)
@@ -56,10 +70,7 @@ newdirmask=$(date +%Y%m%d''%H%M%S)
 # yearstring=$(date +%Y)
 yearstring="20"
 
-OLDIFS=$IFS
-newline=$'\012'
-
-help=$'© 33HOPS, Sistemas de Informacion y Redes, S.L. - 33hops.com - © xsibackup 4.2.3\r
+help=$'© 33HOPS, Sistemas de Informacion y Redes, S.L. - 33hops.com - © xsibackup 4.2.5\r
 Backup Utility for the © VMware ESXi 5.X Hypervisor Series
 
 RULES:
@@ -83,6 +94,7 @@ OPTIONS:
 --install-cron		This will install the cron system and file xsibackup-cron to the current dir.
 			You can add as many XSIBackup commands as you want into this file, one per line.
 			The only thing you have to do is add the parameter --time, i.e. --time="Mon 23:30".
+			You can find detailed instructions in the sample xsibackup-cron file.
 
 --backup-point		1) Full path to the backup mount point within the local server, it will tipically be under
 			/vmfs/volumes, i.e. /vmfs/volumes/backup, /vmfs/volumes/datastore2.
@@ -125,6 +137,10 @@ OPTIONS:
 --subject		Set your own subject for the e-mail report
 
 --smtp-srv		SMTP server that we will use to send the HTML e-mail report through.
+
+--smtp-auth		none|plain. You can choose plain text authentication or no authentication for SMTP
+			servers configured as open relays inside a controlled LAN. Use at your own risk.
+			If you set --smtp-auth to none you do not need to supply a username and password.
 
 --smtp-port		SMTP server port
 
@@ -352,7 +368,13 @@ then
         	[Yy]* )
         	sed -i 's/\/bin\/kill \$(cat \/var\/run\/crond.pid)//g' /etc/rc.local.d/local.sh
        		sed -i '/\/vmfs\/volumes\/.*\/xsibackup-cron/d' /etc/rc.local.d/local.sh
-       		sed -i 's/\/usr\/lib\/vmware\/busybox\/bin\/busybox crond//g' /etc/rc.local.d/local.sh	 
+       		sed -i 's/\/usr\/lib\/vmware\/busybox\/bin\/busybox crond//g' /etc/rc.local.d/local.sh
+        	# BusyBox sed is broken fails in line deletions so we
+                # inverse the file, take the whole minus the matched line
+                # and overwrite /var/spool/cron/crontabs/root
+                TAB=$( sed -n '/xsibackup/!p' /var/spool/cron/crontabs/root )
+                echo "$TAB" > /var/spool/cron/crontabs/root
+       		echo "xsibackup-cron has been removed"	 
         
         exit 0;;
         [Nn]* ) exit 0;;
@@ -376,9 +398,26 @@ case $yn in
         touch $PWD/xsibackup-cron
         chmod 0700 $PWD/xsibackup-cron
         echo "#!/bin/sh" > $PWD/xsibackup-cron
-        echo "# This is your XSIBackup crontab, you can add your backup sechedules here." >> $PWD/xsibackup-cron
+        echo "# This is your XSIBackup crontab, you can add your backup sechedules here" >> $PWD/xsibackup-cron
         echo "# You can use regular XSIBackup commands appending the parameter --time=\"Day HH:mm\", i.e. --time=\"Mon 21:57\"" >> $PWD/xsibackup-cron
-        echo "You need to reboot your ESXi box for the changes to take effect."
+        echo "# The --time format is compounded by three letters weekday acronym (Mon,Tue,Wed,Thu,Fri,Sat,Sun) + space + hh:mm" >> $PWD/xsibackup-cron
+        echo "# You can add multiple \"moments\" in a --time argument separated by a pipeline | like: Mon 17:31|Tue 21:33|Sun 19:21" >> $PWD/xsibackup-cron
+        echo "#" >> $PWD/xsibackup-cron
+        echo "# Example:" >> $PWD/xsibackup-cron
+        echo "# /vmfs/volumes/datastore1/xsibackup-dir/xsibackup --time=\"Mon 01:59|Tue 14:58|Wed 17:23|Thu 01:59|Fri 21:59|Sat 10:33|Sun 04:51\" --backup-point=\"/vmfs/volumes/backup\" --backup-type=custom --backup-vms=\"XP01,W701!scsi2:0;scsi3:1;scsi3:2,LIN02,BSD03\"  --mail-from=me@mydomain.com --mail-to=someoneelse@otherdomain.com  --smtp-srv=smtp.mydomain.com --smtp-port=587 --smtp-usr=me@mydomain.com --smtp-pwd=mypassword" >> $PWD/xsibackup-cron
+        echo "Removing cron info..."
+        # BusyBox sed is broken fails in line deletions so we 
+        # inverse the file, take the whole minus de matched line 
+        # and overwrite /var/spool/cron/crontabs/root
+        TAB=$( sed -n '/xsibackup/!p' /var/spool/cron/crontabs/root )
+        echo "$TAB" > /var/spool/cron/crontabs/root
+        echo "Adding new cron info..."
+        /bin/echo "*/1 * * * * $PWD/xsibackup-cron >> $PWD/xsibackup-cron.log 2>&1" >> /var/spool/cron/crontabs/root
+        echo "The local cron service will be restarted"
+        echo "You might need to reboot the ESxi server for the changes to take effect..."
+        /bin/kill $(cat /var/run/crond.pid)
+        /usr/lib/vmware/busybox/bin/busybox crond
+        echo "cron service restarted"
 
     exit 0;;
     [Nn]* ) exit 0;;
@@ -450,7 +489,7 @@ then
 		echo "xsibackup-rsync binary could not be found on the remote ESXi system datastore"
 		read -p "Do you wish to copy xsibackup-rsync to the other end? (y/n) " yn			
 		case $yn in
-		[Yy]* ) scp -P$baksrvport $PWD/xsibackup-rsync root@$baksrvaddr:$baksrvdire;;
+		[Yy]* ) scp -P$baksrvport "$PWD"/xsibackup-rsync root@$baksrvaddr:$baksrvdire;;
     		[Nn]* ) exit 0;;
             	* ) echo "Please answer (y)es or (n)o."; exit 0;;
             	esac
@@ -501,7 +540,9 @@ fi
 
 if [[ -z ${smtpauth} ]]
 then
-        smtpauth="none"
+        smtpauth="plain"
+elif [ "$smtpauth" = "none" ]
+then
 	SEND_EMAIL_MSG=$SEND_EMAIL_MSG"The --smtp-auth string has been set to -none-, if your SMTP server requires authentication please set it to -plain-.$newline"
 fi
 
@@ -973,6 +1014,7 @@ cloneVM(){
 
 	if [ "$SERVERTYPE" = "DIR" ]
 	then
+$( echo \"$2\" >> prueba.txt )	
 		if [ -d "$2" ]
         	then
                 	rm -rf "$2/"*
@@ -1475,7 +1517,7 @@ STARTVM=$(date +%s)
                 IFS=$newline
 		if [ "$EXCLUDEVMDK" != "" ]
 		then
-                	echo "Excluding the following disks: $EXCLUDEVMDK"
+                	echo "Excluding disks matching pattern: $EXCLUDEVMDK"
 		fi
 
 
@@ -1652,9 +1694,12 @@ then
 		mail_input() {
   		echo -ne "helo ${HOSTNAME}\r\n"
   		echo -ne "ehlo ${HOSTNAME}\r\n"
+  		if [ "$smtpauth" != "none" ]
+  		then
   		echo -ne "AUTH LOGIN\r\n"
   		echo -ne "$( base64_encode $smtpusr )\r\n"
   		echo -ne "$( base64_encode $smtppwd )\r\n"
+  		fi
   		echo -ne "MAIL FROM: <${mailfrom}>\r\n"
   		echo -ne "RCPT TO: <${mailto}>\r\n"
   		echo -ne "DATA\r\n"
@@ -1668,10 +1713,12 @@ then
   		echo -ne "quit"
 		}
 
+		# TLS Session, for future versions, in the to do list
+		# openssl s_client -starttls smtp -connect smtp.server.com:25 -crlf -ign_eof
+		
 		mail_input | nc $smtpsrv $smtpport || err_exit
 
 		# We close the SMTP port
 		esxcli network firewall ruleset set --ruleset-id=SMTPout --enabled=false
 		echo "Firewall rule SMTPout closed."	
 fi
-
