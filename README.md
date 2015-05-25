@@ -1,4 +1,4 @@
-XSIBACKUP 4.2.5 Automated Backups for VMWare ESXi
+XSIBACKUP 4.3.0 Automated Backups for VMWare ESXi
 
     Copyright (C) 2013-2015 33HOPS, Sistemas de Información y Redes, S.L. 
     Developer: Daniel Jesús García Fidalgo
@@ -25,13 +25,17 @@ XSIBACKUP 4.2.5 Automated Backups for VMWare ESXi
 
 ONE-LINER INSTALL (recommended):
 
-	# wget http://33hops.com/downloads/?f=xsibackup.zip -O xsibackup.zip;unzip -o xsibackup.zip;chmod 0700 xsibackup*
+	# wget http://33hops.com/downloads/?f=xsibackup.zip -O xsibackup.zip && unzip -o xsibackup.zip && chmod 0700 xsibackup*
 
 	Change directory (cd) to the desired install directory, i.e.: # cd /vmfs/volumes/datastore1
 	Cut and paste the above one-liner to install XSIBackup in the current
 	working directory.
 
 CHANGE LOG:
+
+	4.3.0 Support for TLS e-mail communications. Added Rsync option for local backups 
+	between datastores that will allow to do differential mirroring of disks locally.
+	Improved error reporting and minor bugs fixed.	
 
 	4.2.5 Added support for multiple times in each cron line. You don't need to set a 
 	different line for each backup to be executed. You can separate different times with
@@ -288,6 +292,11 @@ OPTIONS:
 	All: backup -all- VMS. 
 	Running: backup only running virtual machines.
 
+--backup-prog  
+         
+	Defaults to Rsync for TCP/IP backups and to vmkfstools for datastore backups, unless 
+	explicitly set to "rsync". In this case local copies will be done by means of rsync.	
+	
 --backup-vms
 
 	List of virtual machines to backup as a comma separated list, i.e: 
@@ -328,6 +337,12 @@ OPTIONS:
 
 	SMTP server port used for communication
 
+--smtp-sec
+
+	SMTP authentication scheme, set it =TLS (upper case) if needed, default is no 
+	encription. Not compatible with Gmail, maybe in a future version. Depends on
+	the configuration of the e-mail server.
+	
 --smtp-usr
 
 	SMTP username we will use in the plain text SMTP authentication. Please note 
