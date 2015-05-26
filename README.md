@@ -200,7 +200,7 @@ The easy way:
 
 	Cut & paste the following line in your ESXi command line and press enter. 
 
-	# wget http://33hops.com/downloads/?f=xsibackup.zip -O xsibackup.zip;unzip -o xsibackup.zip;chmod 0700 xsibackup*
+	# wget http://33hops.com/downloads/?f=xsibackup.zip -O xsibackup.zip && unzip -o xsibackup.zip && chmod 0700 xsibackup*
 
 	This will download last version, unzip it and assign execute rights.
 
