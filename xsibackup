@@ -70,7 +70,7 @@ newdirmask=$(date +%Y%m%d''%H%M%S)
 # yearstring=$(date +%Y)
 yearstring="20"
 
-help=$'© 33HOPS, Sistemas de Informacion y Redes, S.L. - 33hops.com - © xsibackup 4.3.0\r
+help=$'© 33HOPS, Sistemas de Informacion y Redes, S.L. - 33hops.com - © xsibackup 4.3.1\r
 Backup Utility for the © VMware ESXi 5.X Hypervisor Series
 
 RULES:
@@ -1116,17 +1116,17 @@ cloneVM(){
                                 			killRsync
                                 			RSYNCOUT=$("$PWD/xsibackup-rsync" -rlpDvzz  --progress --partial "$origin" "$target" >&5 2>"$errfileb")	
                                 			# And now the flat file
-                                			flatfile=$(grep -ri "\-flat.vmdk" "$origin" | awk '{ print $4 }')
-                                			flatfile=${flatfile//\"/}
+                                			flatfile="$(grep -ri "\-flat.vmdk" "$origin" | cut -d' ' -f 4- )"
+                                			flatfile="${flatfile//\"/}"
                                 			vmdkfile=$( basename "$origin" )
                                 			vmdkdire=${origin//"$vmdkfile"/}
-                                			flatorigin="$vmdkdire/$flatfile"
-                                			flattarget="$2/$flatfile"
+                                			flatorigin="$vmdkdire""$flatfile"
+                                			flattarget="$2"/"$flatfile"
                                 			if [ -e "$flatorigin" ]
                                 			then
                                 				if [ -e "$flattarget" ]
                                 				then
-                                					RSYNCOUT=$("$PWD/xsibackup-rsync" -rlpDv --progress --omit-dir-times "$flatorigin" "$flattarget" >&5 2>"$errfileb")
+                                					RSYNCOUT=$("$PWD/xsibackup-rsync" -rlpDv --size-only --progress "$flatorigin" "$flattarget" >&5 2>"$errfileb")
                                 				else
                                 					RSYNCOUT=$("$PWD/xsibackup-rsync" -rlpDv --progress --whole-file --sparse "$flatorigin" "$flattarget" >&5 2>"$errfileb")
                                 				fi
