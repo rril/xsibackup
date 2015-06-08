@@ -1,4 +1,4 @@
-XSIBACKUP 4.3.0 Automated Backups for VMWare ESXi
+XSIBACKUP 4.3.1 Automated Backups for VMWare ESXi
 
     Copyright (C) 2013-2015 33HOPS, Sistemas de Información y Redes, S.L. 
     Developer: Daniel Jesús García Fidalgo
@@ -33,6 +33,8 @@ ONE-LINER INSTALL (recommended):
 
 CHANGE LOG:
 
+	4.3.1 Fixed bug, local rsync differential backups now allow spaces in paths.
+	
 	4.3.0 Support for TLS e-mail communications. Added Rsync option for local backups 
 	between datastores that will allow to do differential mirroring of disks locally.
 	Improved error reporting and minor bugs fixed.	
