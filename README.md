@@ -1,4 +1,4 @@
-XSIBACKUP 4.3.1 Automated Backups for VMWare ESXi
+XSIBACKUP 4.4.0 Automated Backups for VMWare ESXi
 
     Copyright (C) 2013-2015 33HOPS, Sistemas de Información y Redes, S.L. 
     Developer: Daniel Jesús García Fidalgo
@@ -33,6 +33,15 @@ ONE-LINER INSTALL (recommended):
 
 CHANGE LOG:
 
+	4.4.0 Now it is possible to use vmkfstools or rsync for local backups by using
+	the --backup-prog switch. Over the network transfers will only be possible with
+	rsync. By combining the --backup-prog switch with the --date-dir argument you can
+	mirror or build backup catalogs to a local datastore or over the network.
+	A new argument --backup-room is also introduced that will allow to set the 
+	ammount of disk space that XSIBackup will use for its date subfolder backups.
+	BUGFIX: added the -f flag to HOSTNAME=$(hostname -f) to get the fully qualified
+	domain name under ESXi 6.0 (thanks to Jayce for reporting the bug).
+		
 	4.3.1 Fixed bug, local rsync differential backups now allow spaces in paths.
 	
 	4.3.0 Support for TLS e-mail communications. Added Rsync option for local backups 
@@ -55,7 +64,7 @@ CHANGE LOG:
 IMPORTANT:
 
 	Since version 4.2.3 XSIBackup will change its license model and will 
-	be hosted at github.com: https://github.com/33hops/xsibackup
+	be also hosted at github.com: https://github.com/33hops/xsibackup
 	All international Copyright laws will be applied by default.
 
 	Q: How does this affect me?
@@ -298,6 +307,12 @@ OPTIONS:
          
 	Defaults to Rsync for TCP/IP backups and to vmkfstools for datastore backups, unless 
 	explicitly set to "rsync". In this case local copies will be done by means of rsync.	
+
+--backup-room           
+
+	Space that will be used for backups in gigabytes. Once this limit is reached the
+    eldest backup folders with XSIBackup folder mask will be deleted. If this argument
+    is omitted all available space will be used.
 	
 --backup-vms
 
@@ -360,6 +375,12 @@ OPTIONS:
 	You can try your configuration and the e-mail receipt before putting it 
 	into production.
 
+--smtp-delay            
+
+	Set number of seconds from 1 to 3. This will add a delay after the e-mail body and
+    before the QUIT command. May help as a workaround with some e-mail servers like
+    hMailServer. Use only as last resource.	
+	
 --link-srv		
 
 	This command needs an argument like this --link-srv=192.168.0.100 
