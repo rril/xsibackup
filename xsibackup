@@ -18,6 +18,7 @@
 
 OLDIFS=$IFS
 newline=$'\012'
+backuproom=0
 
 keyvalstr="$@"
 
@@ -52,7 +53,7 @@ then
 	fi	
 fi
 
-HOSTNAME=$(hostname)
+HOSTNAME=$(hostname -f)
 
 CURRDIR=$(dirname $0)
 PWD=$(pwd)
@@ -70,7 +71,7 @@ newdirmask=$(date +%Y%m%d''%H%M%S)
 # yearstring=$(date +%Y)
 yearstring="20"
 
-help=$'© 33HOPS, Sistemas de Informacion y Redes, S.L. - 33hops.com - © xsibackup 4.3.1\r
+help=$'© 33HOPS, Sistemas de Informacion y Redes, S.L. - 33hops.com - © xsibackup 4.4.0\r
 Backup Utility for the © VMware ESXi 5.X Hypervisor Series
 
 RULES:
@@ -119,6 +120,11 @@ OPTIONS:
 			All: backup -all- VMS.
 			Running: backup only running virtual machines.
 
+--date-dir		yes (default) | no
+			Determines if a date subfolder in the form yyyymmddhhmmss is created, if no is chosen
+			the backups will be directly made to the backup root overwriting files or adding the
+			differential data depending on the --backup-prog argument.
+
 --backup-vms		List of virtual machines to backup as a comma separated list. You can exclude disks by
 			adding an exclamation sign followed by a list of disks delimited by a semicolon [;]
 			Example: --backup-vms=VM1!scsi0:1;scsi0:2,VM2!disk1;disk2
@@ -129,6 +135,10 @@ OPTIONS:
 
 --backup-prog		Defaults to Rsync for TCP/IP backups and to vmkfstools for datastore backups, unless
 			explicitly set to rsync. In this case local copies will be done by means of rsync.
+
+--backup-room		Space that will be used for backups in gigabytes. Once this limit is reached the 
+			eldest backup folders with XSIBackup folder mask will be deleted. If this argument
+			is omitted all available space will be used.
 
 --test-mode=true	Allows testing backup procedure and e-mail submission without having to wait for a
 			full backup process. In this mode VMs are not copied to the backup disk.
@@ -153,6 +163,10 @@ OPTIONS:
 --smtp-pwd		SMTP password used for authentication against the SMTP server.			
 
 --smtp-sec		SMTP authentication scheme, set it =TLS (upper case) if needed, default is no encription
+
+--smtp-delay		Set number of seconds from 1 to 3. This will add a delay after the e-mail body and 
+			before the QUIT command. May help as a workaround with some e-mail servers like 
+			hMailServer. Use only as last resource.
 
 --link-srv		This command needs an argument like this --link-srv=192.168.0.100. It generates a DSA
 			key locally and adds it to the authorized_keys file at the remote host allowing to
@@ -518,6 +532,17 @@ else
 	fi
 fi
 
+if [ -z "$backupprog" ]
+then
+	backupprog="vmkfstools"
+else
+	if [[ "$backupprog" != "vmkfstools" -a "$backupprog" != "rsync" ]]
+	then
+		echo "The only accepted values for --backup-prog are vmkfstools | rsync"
+		DO_BACKUP=0	
+	fi
+fi
+
 SEND_EMAIL=1
 
 if [[ -z ${mailfrom} ]]
@@ -591,33 +616,46 @@ fi
 
 if [[ "${DO_BACKUP}" == 0 ]]
 then
-        echo "The backup will halt here becose some mandatory values are missing"
+        echo "The backup will halt here becouse some mandatory values are missing"
         exit 0
 fi
 
+if [ "$backuproom" -gt 0 ]
+then
+	echo "The backup room has been limited to $backuproom gb."
+fi
+                                        
 avail_backup_room(){
 
         OLDIFS=$IFS
-        AVAILS=`df -m`
+        AVAILS=$( df -m )
         MYPATH=$( getMountedPath $1 )
         IFS=$newline
-                for line in $AVAILS
-                do
-                DFPATH=$( echo $line | awk '{ print $6 }' )
-                #echo "$DFPATH"
-                        if [[ "${MYPATH#*$DFPATH}" != "$MYPATH" ]]
-                        then
-                         THEROOM=$( echo $line | awk '{ print $4 }' )
-                        fi
-                done
+               	for line in $AVAILS
+               	do
+               	DFPATH=$( echo $line | awk '{ print $6 }' )
+               	#echo "$DFPATH"
+                       	if [[ "${MYPATH#*$DFPATH}" != "$MYPATH" ]]
+                       	then
+                       		THEUSED=$( du -scm "$backuppoint"/20* | grep total | awk '{ print $1 }' )
+                       		#THEUSED=$( du -m "$backuppoint"/20* )
+                       		THEROOM=$( echo $line | awk '{ print $4 }' )
+                       	fi
+               	done
         IFS=$OLDIFS
 
 	if [[ -z ${THEROOM} ]]
 	then
 		echo "Could not get available backup room in backup device."	
 	else
-		echo $THEROOM
-	fi	
+		if [ "$backuproom" -gt 0 ]
+		then
+			echo $(( $backuproom*1024-$THEUSED ))			
+		else	
+			echo $THEROOM
+		fi
+	fi
+
 }
 
 get_vm_state(){
@@ -636,9 +674,18 @@ make_room(){
         OLDIFS=$IFS
         ROOMUSED=$( du -sm $2 )
 
-        while [[ $1 -gt $(avail_backup_room $2)  ]]
+        n=0
+        while [[ "$1" -gt "$(avail_backup_room $2)" ]]
         do
-                OLDESTDIR=`find $2/ -type d -name "$yearstring*" -maxdepth 1 | sort -nr | tail -1`
+                if [ "$n" -gt 99 ]
+                then
+                	available=$(avail_backup_room $2)
+                	echo "Cannot make $(( $1/1024 ))G of room, only $(( $available/1024 ))G can be made available."
+                	exit 0
+                fi
+                
+                OLDESTDIR=$( find $2/ -type d -name "$yearstring*" -maxdepth 1 | sort -nr | tail -1 )
+                n=$(( $n+1 ))
                 rm -rf $OLDESTDIR
                 DELDIRS=$DELDIRS"<br />"$OLDESTDIR
 
@@ -1023,19 +1070,33 @@ cloneVM(){
 		$( ERR $? "Error removing snapshots for: \"$1\"" )
 	fi
 
+	datedir=$( echo $datedir | awk '{print tolower($0)}' )
+
 	if [ "$SERVERTYPE" = "DIR" ]
 	then
-		if [ -d "$2" ]
+
+        	if [ "$datedir" = "yes" ]
         	then
-                	rm -rf "$2/"*
+                	thedir="$2"/"$newdirmask"/"$NAM"
         	else
-                	mkdir -p "$2"
+                	thedir="$2"/"$NAM"
         	fi
-		cp "$VMXDir/"*".vmx" "$2"
+
+		if [ -d "$thedir" ]
+        	then
+                	if [ "$backupprog" = "vmkfstools" ]
+                	then
+                		rm -rf "$thedir/"*
+        		fi
+        	else
+                	mkdir -p "$thedir"
+        	fi
+		cp "$VMXDir/"*".vmx" "$thedir"
 	
 	elif [ "$SERVERTYPE" = "NET" ]
 	then	
-                if [ "$backsrvtrf" = "F" ]
+                thedir="$2"
+		if [ "$backsrvtrf" = "F" ]
                 then
 			COMPRESS="zz"
 			#RSYNCADD="--whole-file"
@@ -1100,10 +1161,10 @@ cloneVM(){
                                 if [ -e "$thedisk" ]
                                 then
                                 	origin="$thedisk"
-                                	target=$2/$(getFilename "$thedisk")
+                                	target="$thedir"/$(getFilename "$thedisk")
                                 else
                                         origin="$VMXDir/$thedisk"
-                                        target="$2/$thedisk"
+                                        target="$thedir/$thedisk"
                                 fi
                                 
                                 if [ "$SERVERTYPE" = "DIR" ]
@@ -1114,19 +1175,19 @@ cloneVM(){
                                 		if [ "$4" = "rsync" ]
                                 		then
                                 			killRsync
-                                			RSYNCOUT=$("$PWD/xsibackup-rsync" -rlpDvzz  --progress --partial "$origin" "$target" >&5 2>"$errfileb")	
+                                			RSYNCOUT=$("$PWD/xsibackup-rsync" -rlpDv  --progress --partial "$origin" "$target" >&5 2>"$errfileb")	
                                 			# And now the flat file
                                 			flatfile="$(grep -ri "\-flat.vmdk" "$origin" | cut -d' ' -f 4- )"
                                 			flatfile="${flatfile//\"/}"
                                 			vmdkfile=$( basename "$origin" )
                                 			vmdkdire=${origin//"$vmdkfile"/}
                                 			flatorigin="$vmdkdire""$flatfile"
-                                			flattarget="$2"/"$flatfile"
+                                			flattarget="$thedir"/"$flatfile"
                                 			if [ -e "$flatorigin" ]
                                 			then
                                 				if [ -e "$flattarget" ]
                                 				then
-                                					RSYNCOUT=$("$PWD/xsibackup-rsync" -rlpDv --size-only --progress "$flatorigin" "$flattarget" >&5 2>"$errfileb")
+                                					RSYNCOUT=$("$PWD/xsibackup-rsync" -rlpDv --progress "$flatorigin" "$flattarget" >&5 2>"$errfileb")
                                 				else
                                 					RSYNCOUT=$("$PWD/xsibackup-rsync" -rlpDv --progress --whole-file --sparse "$flatorigin" "$flattarget" >&5 2>"$errfileb")
                                 				fi
@@ -1138,7 +1199,7 @@ cloneVM(){
                                 		fi
                                 		exec 5>&-
                                 	else
-                                		$( ERR 33 "No disk found at: $origin" )
+                                		$( ERR 33 "No origin disk found at: $origin" )
                                 	fi
                                 
 				elif [ "$SERVERTYPE" = "NET" ]
@@ -1180,7 +1241,7 @@ cloneVM(){
                                 	vmdkfile=$( basename "$origin" )
                                 	vmdkdire=${origin//"$vmdkfile"/}
                                 	flatorigin="$vmdkdire/$flatfile"
-					flattarget="$2/$flatfile"		
+					flattarget="$thedir/$flatfile"		
 					if [ -e "$flatorigin" ]
 					then
 						LS=$(ssh -p "$baksrvport" "$baksrvaddr" exec "ls -la \"$flattarget\" 2>&1")
@@ -1392,6 +1453,13 @@ then
 	ENOUGH_ROOM=1
 fi
 
+
+	emailHTMLStr=$emailHTMLStr"<tr>
+              <td colspan=\"8\">Using <b>"$backupprog"</b> to do the backup.<br />
+              </td>
+        </tr>\n"
+
+
 if [ "$SERVERTYPE" = "DIR" ]
 then
 
@@ -1409,6 +1477,14 @@ then
 	ENOUGH_ROOM=0
 	echo "Not enough room to make the backup, some older folders will be deleted."
 	fi
+
+	if [ "$backuproom" -gt 0 ]
+	then
+        	emailHTMLStr=$emailHTMLStr"<tr>
+			<td colspan=\"8\">The backup room has been limited to "$backuproom" Gb.<br />
+			</td>
+		 </tr>\n"	        	
+        fi
 
 	emailHTMLStr=$emailHTMLStr"<tr>
                 <td colspan=\"8\">Available room in device $backuppoint before backup: "$AVAILA_ROOM" Gb.<br />
@@ -1564,7 +1640,9 @@ STARTVM=$(date +%s)
 			then
 				makeRoomHtml=""
 				# Now we make room for the current backup
-				ROOMWENEED=$(( $VMSIZE * (120/100) + 12288 ))
+				ROOMWENEED=$(( $VMSIZE * (120/100) ))
+				# Deprecated 120% + 12288 VMWare rule
+				# ROOMWENEED=$(( $VMSIZE * (120/100) + 12288 ))
 				echo "Attempting to make room at $backuppoint in local server"
 				MAKEROOMRESP=$(make_room $ROOMWENEED "$backuppoint")	
 
@@ -1576,12 +1654,13 @@ STARTVM=$(date +%s)
 				fi
 			fi
 		
-			if [ "$backupprog" = "rsync" ]
-			then
-				cloneVM $VMIDNU "$backuppoint/$VMDIRN" "$EXCLUDEVMDK" "$backupprog"
-			else
-				cloneVM $VMIDNU "$backuppoint/$newdirmask/$VMDIRN" "$EXCLUDEVMDK"
-			fi
+			#if [ "$backupprog" = "rsync" ]
+			#then
+				cloneVM $VMIDNU "$backuppoint" "$EXCLUDEVMDK" "$backupprog"
+				#cloneVM $VMIDNU "$backuppoint/$VMDIRN" "$EXCLUDEVMDK" "$backupprog"
+			#else
+			#	cloneVM $VMIDNU "$backuppoint/$newdirmask/$VMDIRN" "$EXCLUDEVMDK"
+			#fi
 			
 			#CLONERETURN=$(cloneVM $VMIDNU "$backuppoint/$newdirmask/$VMDIRN")
 		
@@ -1747,13 +1826,20 @@ then
   		echo -ne "Subject: ${subject}\r\n"
 		echo -ne "\r\n"
   		echo -ne $emailHTMLStr"\r\n"
+  		if [ "$smtpdelay" -gt 0 -a "$smtpdelay" -lt 4 ]
+  		then
+  			sleep $smtpdelay
+  		fi
   		echo -ne ".\r\n"
+                if [ "$smtpdelay" -gt 0 -a "$smtpdelay" -lt 4 ]
+                then
+                        sleep $smtpdelay
+                fi  		
   		echo -ne "quit\r\n"
 		}
 
-		if [[ $smtpsec == "TLS" ]]
+		if [[ "$smtpsec" = "TLS" ]]
 		then		
-			# TLS Session, for future versions, in the to do list
 			mail_input | openssl s_client -starttls smtp -connect ${smtpsrv}:${smtpport} -ign_eof
 		else
 			mail_input | nc $smtpsrv $smtpport || err_exit
