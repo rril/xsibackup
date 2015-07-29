@@ -132,6 +132,9 @@ OPTIONS:
 			or by its device descriptor. Take on account that if you use an ambiguous string per
 			instance "scsi" more than one disk may be excluded. This parameter is only needed if 
 			custom is selected as the --backup-type.
+			
+--quiesce		yes | no (default)
+			Quiesces the filesystem in the guest VM when taking a snapshot
 
 --backup-prog		Defaults to Rsync for TCP/IP backups and to vmkfstools for datastore backups, unless
 			explicitly set to rsync. In this case local copies will be done by means of rsync.
@@ -1125,8 +1128,15 @@ cloneVM(){
 		fi
 	fi
 
+	if [ "$quiesce" = "yes" ]
+	then
+		quiesceParam=1
+	else
+		quiesceParam=0
+	fi
+				
         ALLVMDK=$( grep vmdk "$VMXDir/"*".vmx" )
-        vim-cmd vmsvc/snapshot.create $1 xsibackup 2>&1 >/dev/null
+        vim-cmd vmsvc/snapshot.create $1 xsibackup "" 0 $quiesceParam 2>&1 >/dev/null
         IFS=$newline
         for eachdisk in $ALLVMDK
         do
